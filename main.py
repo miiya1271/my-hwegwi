@@ -110,4 +110,4 @@ with col3:
     st.write(f"• **MSE**: `{res_all['mse']:.4f}`")
     st.write(f"• **$R^2$**: `{res_all['r2']:.4f}`")
 
-st.markdown("---
+st.markdown("---")
