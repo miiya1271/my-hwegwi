@@ -8,11 +8,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 st.set_page_config(page_title="서울 기온 예측기 & 모델 평가", page_icon="🌡️", layout="wide")
 
-st.title("🌡️ 서울 연도별 기온 예측기 및 머신러닝 모델 평가")
-st.markdown("""
-과거 학습 기간(**최근 50년: 1956~2005년** vs **최근 100년: 1906~2005년**)에 따른 회귀선의 기울기 변화와,  
-공통 **테스트 데이터(최근 20년: 2006~2025년)**에 대한 예측 성능(**MAE, MSE, R²**)을 비교합니다.
-""")
+st.title("🌡️ 서울 연도별 기온 예측기 & 모델 평가")
 
 # 1. 데이터 불러오기 및 전처리
 @st.cache_data
@@ -20,11 +16,9 @@ def load_and_process_data():
     url = "https://raw.githubusercontent.com/greatsong/modudata/bb860932644270ad1199f10d3e7670e30231bce4/data/seoul.csv"
     df = pd.read_csv(url, encoding="utf-8")
     
-    # 날짜 변환 및 연도 추출
     df["날짜"] = pd.to_datetime(df["날짜"])
     df["연도"] = df["날짜"].dt.year
     
-    # 연도별 관측일수 및 평균기온 계산
     yearly_df = df.groupby("연도")["평균기온"].agg(
         관측일수="count",
         연평균기온="mean"
@@ -40,36 +34,80 @@ def load_and_process_data():
 
 df_filtered = load_and_process_data()
 
-# 2. 데이터 분할 (Train / Test)
+# 2. 데이터 세트 분할
+# 훈련 데이터 세트
 train_50 = df_filtered[(df_filtered["연도"] >= 1956) & (df_filtered["연도"] <= 2005)]
 train_100 = df_filtered[(df_filtered["연도"] >= 1906) & (df_filtered["연도"] <= 2005)]
-test_data = df_filtered[(df_filtered["연도"] >= 2006) & (df_filtered["연도"] <= 2025)]
 train_all = df_filtered[df_filtered["연도"] <= 2025]
+
+# 공통 테스트 데이터 세트 (최근 20년: 2006~2025)
+test_data = df_filtered[(df_filtered["연도"] >= 2006) & (df_filtered["연도"] <= 2025)]
 
 X_test = test_data[["연도"]]
 y_test = test_data["연평균기온"]
 
-# 3. 모델 학습 및 예측
-# (1) 최근 50년 학습 모델 (1956~2005)
-model_50 = LinearRegression()
-model_50.fit(train_50[["연도"]], train_50["연평균기온"])
-pred_50 = model_50.predict(X_test)
-
-# (2) 최근 100년 학습 모델 (1906~2005)
-model_100 = LinearRegression()
-model_100.fit(train_100[["연도"]], train_100["연평균기온"])
-pred_100 = model_100.predict(X_test)
-
-# (3) 전체 데이터 학습 모델 (전체 기간)
-model_all = LinearRegression()
-model_all.fit(train_all[["연도"]], train_all["연평균기온"])
-pred_all = model_all.predict(X_test)
-
-# 4. 성능 평가 측정 함수
-def eval_metrics(model, y_true, y_pred):
+# 3. 모델 학습 및 평가
+def train_and_eval(train_df, X_test, y_test):
+    model = LinearRegression()
+    model.fit(train_df[["연도"]], train_df["연평균기온"])
+    
     slope = model.coef_[0]
     intercept = model.intercept_
-    mae = mean_absolute_error(y_true, y_pred)
-    mse = mean_squared_error(y_true, y_pred)
-    r2 = r2_score(y_true, y_pred)
-    rate_100 = slope * 10
+    preds = model.predict(X_test)
+    
+    mae = mean_absolute_error(y_test, preds)
+    mse = mean_squared_error(y_test, preds)
+    r2 = r2_score(y_test, preds)
+    rate_100 = slope * 100
+    
+    return {
+        "model": model,
+        "slope": slope,
+        "intercept": intercept,
+        "rate_100": rate_100,
+        "mae": mae,
+        "mse": mse,
+        "r2": r2,
+        "train_count": len(train_df)
+    }
+
+res_50 = train_and_eval(train_50, X_test, y_test)
+res_100 = train_and_eval(train_100, X_test, y_test)
+res_all = train_and_eval(train_all, X_test, y_test)
+
+# ---------------------------------------------------------
+# 1. 지표 카드 (기울기 및 테스트 성능 나란히 비교)
+# ---------------------------------------------------------
+st.subheader("📊 학습 모델별 기울기 및 테스트 데이터(2006~2025) 평가 결과")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("### 🔹 최근 50년 학습 (1956~2005)")
+    st.metric("100년당 기온 상승 폭", f"+{res_50['rate_100']:.2f} °C")
+    st.write(f"• **기울기**: `{res_50['slope']:.5f}` °C/년")
+    st.write(f"• **회귀식**: $y = {res_50['slope']:.5f}x + ({res_50['intercept']:.3f})$")
+    st.write(f"• **MAE**: `{res_50['mae']:.4f}` °C")
+    st.write(f"• **MSE**: `{res_50['mse']:.4f}`")
+    st.write(f"• **$R^2$**: `{res_50['r2']:.4f}`")
+
+with col2:
+    st.markdown("### 🔸 최근 100년 학습 (1906~2005)")
+    diff_rate = res_100['rate_100'] - res_50['rate_100']
+    st.metric("100년당 기온 상승 폭", f"+{res_100['rate_100']:.2f} °C", delta=f"{diff_rate:+.2f} °C (vs 50년)")
+    st.write(f"• **기울기**: `{res_100['slope']:.5f}` °C/년")
+    st.write(f"• **회귀식**: $y = {res_100['slope']:.5f}x + ({res_100['intercept']:.3f})$")
+    st.write(f"• **MAE**: `{res_100['mae']:.4f}` °C")
+    st.write(f"• **MSE**: `{res_100['mse']:.4f}`")
+    st.write(f"• **$R^2$**: `{res_100['r2']:.4f}`")
+
+with col3:
+    st.markdown("### 🟢 전체 데이터 학습 (1908~2025)")
+    st.metric("100년당 기온 상승 폭", f"+{res_all['rate_100']:.2f} °C")
+    st.write(f"• **기울기**: `{res_all['slope']:.5f}` °C/년")
+    st.write(f"• **회귀식**: $y = {res_all['slope']:.5f}x + ({res_all['intercept']:.3f})$")
+    st.write(f"• **MAE**: `{res_all['mae']:.4f}` °C")
+    st.write(f"• **MSE**: `{res_all['mse']:.4f}`")
+    st.write(f"• **$R^2$**: `{res_all['r2']:.4f}`")
+
+st.markdown("---
